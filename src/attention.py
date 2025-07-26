@@ -1,12 +1,18 @@
 import torch
 import torch.nn as nn
-import torch.functional as F
-import numpy as np
-from typing import Optional
-
 import math
 
+from typing import Optional
+
+
 class Attention(nn.Module):
+    """Scaled Dot-Product Attention
+    
+    Output is computed as a weighted sum of the values, where each weight,
+    associated with the value is computed using dot product of the query 
+    with the corresponding key. 
+    """
+    
     def __init__(
         self,
         d_model: int = 512,
@@ -27,11 +33,12 @@ class Attention(nn.Module):
     def forward(
         self, 
         x: torch.Tensor,
-        mask: Optional[torch.Tensor] = None
+        query: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
     ):
-        Q = self.linear_query(x)
         K = self.linear_key(x)
         V = self.linear_value(x)
+        Q = self.linear_query(x if query is None else query)
         
         attention_scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
         
@@ -44,22 +51,32 @@ class Attention(nn.Module):
         
         return out
         
+        
 class MultiHeadAttention(nn.Module):
+    """Performs several attention computations in parallel.
+    
+    Multi-head attention allows the model to jointly attend to information from different representation
+    subspaces at different positions. With a single attention head, averaging inhibits this.
+    """
     def __init__(
         self,
         d_model: int = 512,
         d_key: int = 64,
         d_value: int = 64,
         n_heads: int = 8,
-    ):  
-        self.heads = nn.ModuleList([
-            Attention(
-                d_model=d_model,
-                d_key=d_key,
-                d_value=d_value,
-            )
-            for _ in range(n_heads)
-        ])
+    ):
+        super().__init__()
+            
+        self.heads = nn.ModuleList(
+            [
+                Attention(
+                    d_model=d_model,
+                    d_key=d_key,
+                    d_value=d_value,
+                )
+                for _ in range(n_heads)
+            ]
+        )
         
         self.linear = nn.Linear(d_value * n_heads, d_model, bias=False)
         
@@ -67,14 +84,16 @@ class MultiHeadAttention(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
+        query: Optional[torch.Tensor] = None,
+        mask: Optional[torch.Tensor] = None,
     ):
-        outputs = []
+        out = []
         
         for head in self.heads:
-            outputs.append(head(x))
+            out.append(head(x, query, mask))
         
-        output_concatenated = torch.cat(outputs, dim=-1)
+        out = torch.cat(out, dim=-1)
         
-        out = self.linear(output_concatenated)
+        out = self.linear(out)
         
         return out
