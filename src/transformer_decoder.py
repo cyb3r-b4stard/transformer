@@ -1,10 +1,15 @@
 import torch
 import torch.nn as nn
+import math
 from typing import Optional
 
 from src.attention import MultiHeadAttention
+from src.positional_encoding import PositionalEncoding
 
 class DecoderBlock(nn.Module):
+    """
+    Decoder block: Masked self-attention + Cross-attention + Feed-forward with residual connections.
+    """
     def __init__(
         self,
         d_model: int = 512,
@@ -25,7 +30,7 @@ class DecoderBlock(nn.Module):
         
         self.layer_norm_1 = nn.LayerNorm(d_model)
         
-        self.multihead_attention = MultiHeadAttention(
+        self.cross_multihead_attention = MultiHeadAttention(
             d_model=d_model, 
             d_key=d_key, 
             d_value=d_value, 
@@ -48,22 +53,22 @@ class DecoderBlock(nn.Module):
         self,
         x: torch.Tensor,
         encoder_out: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
+        self_attention_mask: Optional[torch.Tensor] = None,
+        cross_attention_mask: Optional[torch.Tensor] = None,
     ):
         identity = x.clone()
-        
-        out = self.masked_multihead_attention(x=x, mask=mask)
+        out = self.masked_multihead_attention(x=x, mask=self_attention_mask)
         out = self.dropout(out)
         out = self.layer_norm_1(out + identity)
         
         identity = out.clone()
-        
-        out = self.multihead_attention(x=encoder_out, query=out)
+        out = self.cross_multihead_attention(
+            x=encoder_out, query=out, mask=cross_attention_mask
+        )
         out = self.dropout(out)
         out = self.layer_norm_2(out + identity)
         
         identity = out.clone()
-        
         out = self.feed_forward(out)
         out = self.dropout(out)
         out = self.layer_norm_3(out + identity)
@@ -72,6 +77,9 @@ class DecoderBlock(nn.Module):
         
         
 class TransformerDecoder(nn.Module):
+    """
+    Transformer decoder stack with positional encoding.
+    """
     def __init__(
         self,
         d_model: int = 512,
@@ -81,8 +89,16 @@ class TransformerDecoder(nn.Module):
         n_layers: int = 6,
         n_heads: int = 8,
         p_dropout: float = 0.1,
+        max_seq_length: int = 5000,
     ):
         super().__init__()
+        
+        self.d_model = d_model
+        self.positional_encoding = PositionalEncoding(
+            d_model=d_model,
+            max_seq_length=max_seq_length,
+            p_dropout=p_dropout
+        )
         
         self.layers = nn.ModuleList(
             [
@@ -101,12 +117,19 @@ class TransformerDecoder(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        query: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
+        encoder_out: torch.Tensor,
+        self_attention_mask: Optional[torch.Tensor] = None,
+        cross_attention_mask: Optional[torch.Tensor] = None,
     ): 
-        out = x
+        out = x * math.sqrt(self.d_model)
+        out = self.positional_encoding(out)
         
         for layer in self.layers:
-            out = layer(out, query, mask)
+            out = layer(
+                out,
+                encoder_out,
+                self_attention_mask=self_attention_mask,
+                cross_attention_mask=cross_attention_mask,
+            )
         
         return out

@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
+import math
+from typing import Optional
 
 from src.attention import MultiHeadAttention
+from src.positional_encoding import PositionalEncoding
 
 
 class EncoderBlock(nn.Module):
@@ -37,11 +40,12 @@ class EncoderBlock(nn.Module):
     
     def forward(
         self,
-        x: torch.Tensor
+        x: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
     ):
         identity = x.clone()
         
-        out = self.multihead_attention(x)
+        out = self.multihead_attention(x, mask=mask)
         out = self.dropout(out)
         out = self.layer_norm_1(out + identity)
         
@@ -64,8 +68,16 @@ class TransformerEncoder(nn.Module):
         n_layers: int = 6,
         n_heads: int = 8,
         p_dropout: float = 0.1,
+        max_seq_length: int = 5000,
     ):
         super().__init__()
+        
+        self.d_model = d_model
+        self.positional_encoding = PositionalEncoding(
+            d_model=d_model,
+            max_seq_length=max_seq_length,
+            p_dropout=p_dropout,
+        )
         
         self.layers = nn.ModuleList(
             [
@@ -85,10 +97,12 @@ class TransformerEncoder(nn.Module):
     def forward(
         self, 
         x: torch.Tensor,
+        mask: Optional[torch.Tensor] = None,
     ): 
-        out = x
+        out = x * math.sqrt(self.d_model)
+        out = self.positional_encoding(out)
         
         for layer in self.layers:
-            out = layer(out)
+            out = layer(out, mask=mask)
         
         return out
